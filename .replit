@@ -1,0 +1,37 @@
+run = "PYTHONPATH=.pythonlibs python3 server.py"
+entrypoint = "server.py"
+modules = ["python-base-3.13"]
+
+[nix]
+channel = "stable-25_05"
+
+[deployment]
+run = ["sh", "-c", "PYTHONPATH=.pythonlibs python3 server.py"]
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Markdown MCP server"
+
+[[workflows.workflow]]
+name = "Markdown MCP server"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "PYTHONPATH=.pythonlibs python3 server.py"
+waitForPort = 8000
+
+[workflows.workflow.metadata]
+outputType = "console"
+
+[[ports]]
+localPort = 8000
+externalPort = 80

@@ -1,0 +1,1 @@
+- [Markdown MCP document directory](docs-directory-deployment.md) — prefers `docs`, falls back to the existing `ribanc` corpus, and supports `DOCS_DIR`.
