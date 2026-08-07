@@ -8,3 +8,9 @@ The server prefers a project-level `docs` directory when it exists and otherwise
 **Why:** The project already contains its Markdown corpus in `ribanc`, but the external MCP specification conventionally refers to `docs`; this keeps the current corpus available without copying or renaming it.
 
 **How to apply:** Keep the deployment command as `PYTHONPATH=.pythonlibs python3 server.py` and use `DOCS_DIR` only when the deployment's Markdown directory differs from the project defaults.
+
+The deployment target is Autoscale because the MCP endpoint is stateless and does not require an always-on VM.
+
+**Why:** Autoscale is the appropriate production target for a stateless HTTP tool server and avoids selecting a VM deployment unnecessarily.
+
+**How to apply:** Keep `deploymentTarget = "autoscale"` in the deployment configuration unless the service later needs persistent in-memory state or an always-running process.

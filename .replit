@@ -7,6 +7,7 @@ channel = "stable-25_05"
 
 [deployment]
 run = ["sh", "-c", "PYTHONPATH=.pythonlibs python3 server.py"]
+deploymentTarget = "autoscale"
 
 [workflows]
 runButton = "Project"
