@@ -1,4 +1,4 @@
-run = "PYTHONPATH=.pythonlibs python3 server.py"
+run = "python3 server.py"
 entrypoint = "server.py"
 modules = ["python-base-3.13"]
 
@@ -8,6 +8,7 @@ channel = "stable-25_05"
 [deployment]
 run = ["sh", "-c", "PYTHONPATH=.pythonlibs python3 server.py"]
 deploymentTarget = "autoscale"
+build = ["sh", "-c", "python3 -m pip install --target .pythonlibs -r requirements.txt"]
 
 [workflows]
 runButton = "Project"
@@ -25,13 +26,13 @@ args = "Markdown MCP server"
 name = "Markdown MCP server"
 author = "agent"
 
+[workflows.workflow.metadata]
+outputType = "console"
+
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "PYTHONPATH=.pythonlibs python3 server.py"
 waitForPort = 8000
-
-[workflows.workflow.metadata]
-outputType = "console"
 
 [[ports]]
 localPort = 8000

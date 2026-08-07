@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -207,6 +209,12 @@ def search_markdown(
         "total_matches": total_matches,
         "results": results,
     }
+
+
+@mcp.custom_route("/", methods=["GET"], name="health", include_in_schema=False)
+async def health_check(_: Request) -> JSONResponse:
+    """Return a public readiness response for Replit's Autoscale health probe."""
+    return JSONResponse({"status": "ok", "mcp_endpoint": "/mcp"})
 
 
 if __name__ == "__main__":
