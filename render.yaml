@@ -5,11 +5,7 @@ services:
     plan: free
     healthCheckPath: /health
     envVars:
-      - key: MCP_AUTH_TOKEN
-        generateValue: true
       - key: MCP_ROOT
         value: /app
       - key: CITATION_BASE_URL
         value: https://github.com/cupcakke/alabama/blob/main
-      - key: MCP_ALLOW_QUERY_TOKEN
-        value: "false"
