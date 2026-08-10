@@ -91,7 +91,6 @@ A Valyu DeepResearch task `mcp_servers` mezőjében add meg a saját deployed sz
     {
       "url": "https://<render-service>.onrender.com/mcp",
       "name": "Alabama case documents",
-      "tool_prefix": "alabama",
       "auth": {
         "type": "bearer",
         "token": "<MCP_AUTH_TOKEN>"
