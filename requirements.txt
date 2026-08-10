@@ -1,0 +1,3 @@
+# Official MCP Python SDK with FastMCP and Streamable HTTP support.
+mcp>=1.28,<2
+uvicorn[standard]>=0.30,<1
