@@ -1,0 +1,3 @@
+# Local deployment CLI for Modal. The remote image installs its own runtime
+# dependencies in modal_app.py.
+modal>=1.5,<2

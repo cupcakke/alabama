@@ -135,6 +135,53 @@ Használható kutatási utasítás:
 
 > Először mindig hívd meg az `alabama.search` eszközt a releváns iratok azonosítására, majd az eredmények `id` értékeivel hívd meg az `alabama.fetch` eszközt. Ne próbáld a dokumentumokat a fájlnevek alapján összefoglalni. Csak a lekért szöveg alapján állíts tényt, és a válaszban használd a visszaadott citation URL-eket.
 
+## Deploy Modalra
+
+A `modal_app.py` közvetlenül a repository teljes Markdown-korpusát csomagolja Modal image-be, és a meglévő read-only MCP ASGI alkalmazást teszi ki HTTPS-en. A Modal hivatalosan támogatja az ASGI appok és a stateless Streamable HTTP MCP szerverek futtatását.
+
+### Egyszeri helyi beállítás
+
+A Modal CLI telepítése és a workspace-authentication a saját gépeden történik:
+
+```bash
+python -m pip install -r requirements-modal.txt
+modal setup
+```
+
+A szerver tokenjét ne írd fájlba vagy Git-be. Hozz létre Modal Secretet:
+
+```bash
+modal secret create alabama-mcp-auth MCP_AUTH_TOKEN="$(openssl rand -hex 32)"
+```
+
+Ezután deploy:
+
+```bash
+modal deploy modal_app.py
+```
+
+A CLI kiír egy `https://...modal.run` URL-t. A Valyu MCP URL-je ennek a végére illesztett `/mcp`:
+
+```text
+https://<modal-endpoint>.modal.run/mcp
+```
+
+A Valyu DeepResearch konfigurációban használd ugyanazt a Modal Secretben létrehozott tokent:
+
+```json
+{
+  "url": "https://<modal-endpoint>.modal.run/mcp",
+  "name": "Alabama case documents",
+  "auth": {
+    "type": "bearer",
+    "token": "<MCP_AUTH_TOKEN>"
+  },
+  "allowed_tools": ["search", "fetch"]
+}
+```
+
+A Modal endpoint scale-to-zero módban indulhat, ezért az első Valyu-kérés hidegindítással járhat. A fájlok a deploy időpontjában kerülnek az image-be; egy új repository-verzióhoz futtasd újra a `modal deploy modal_app.py` parancsot. A `modal secret create` és `modal deploy` parancsokhoz aktív Modal-fiók és a helyi Modal CLI-authentication szükséges.
+
 ## Környezeti változók
 
 | Változó | Alapértelmezett | Leírás |
