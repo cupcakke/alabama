@@ -41,7 +41,6 @@ logging.basicConfig(
 REPOSITORY_ROOT = Path(
     os.getenv("MCP_ROOT", str(Path(__file__).resolve().parent))
 ).expanduser().resolve()
-AUTH_TOKEN = os.getenv("MCP_AUTH_TOKEN", "").strip()
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").strip().rstrip("/")
 CITATION_BASE_URL = os.getenv(
     "CITATION_BASE_URL",
@@ -50,11 +49,6 @@ CITATION_BASE_URL = os.getenv(
 MAX_SEARCH_RESULTS = max(1, min(int(os.getenv("MAX_SEARCH_RESULTS", "10")), 50))
 MAX_FETCH_CHARS = max(1, int(os.getenv("MAX_FETCH_CHARS", "2000000")))
 MAX_SNIPPET_CHARS = max(80, min(int(os.getenv("MAX_SNIPPET_CHARS", "900")), 5000))
-ALLOW_QUERY_TOKEN = os.getenv("MCP_ALLOW_QUERY_TOKEN", "false").lower() in {
-    "1",
-    "true",
-    "yes",
-}
 
 # Directory names that are implementation details, not repository documents.
 # In particular, never accidentally expose Git metadata or a virtualenv.
@@ -505,7 +499,7 @@ def get_document(
 
 
 # ---------------------------------------------------------------------------
-# HTTP application, health check and authentication
+# HTTP application and health check
 # ---------------------------------------------------------------------------
 
 async def health(_: Request) -> JSONResponse:
@@ -521,7 +515,6 @@ async def health(_: Request) -> JSONResponse:
             "status": status,
             "service": "alabama-markdown-mcp",
             "documents": count,
-            "auth": bool(AUTH_TOKEN),
         },
         status_code=200 if status == "ok" else 503,
     )
@@ -535,68 +528,6 @@ async def document_http(request: Request) -> PlainTextResponse | JSONResponse:
     except KeyError:
         return JSONResponse({"error": "Markdown document not found"}, status_code=404)
     return PlainTextResponse(text, media_type="text/markdown; charset=utf-8")
-
-
-class BearerTokenMiddleware:
-    """Protect remote HTTP endpoints with a static bearer token.
-
-    The MCP SDK's OAuth implementation is intentionally not enabled here: a
-    single-user Valyu connection is best served by a long random bearer token
-    stored as a deployment secret.  Leaving MCP_AUTH_TOKEN unset keeps local
-    development and stdio usage convenient, but production deployments should
-    always set it.
-    """
-
-    def __init__(self, app: Any) -> None:
-        self.app = app
-
-    @staticmethod
-    def _header_value(scope: Scope, name: bytes) -> str:
-        for key, value in scope.get("headers", []):
-            if key.lower() == name.lower():
-                return value.decode("latin-1")
-        return ""
-
-    def _authorized(self, scope: Scope) -> bool:
-        if not AUTH_TOKEN:
-            return True
-
-        authorization = self._header_value(scope, b"authorization")
-        if authorization.startswith("Bearer "):
-            supplied = authorization[7:].strip()
-            if supplied == AUTH_TOKEN:
-                return True
-
-        # Some MCP clients expose custom header fields more easily than an
-        # Authorization header.  This is also useful for manual curl testing.
-        supplied_header = self._header_value(scope, b"x-mcp-token")
-        if supplied_header == AUTH_TOKEN:
-            return True
-
-        if ALLOW_QUERY_TOKEN:
-            raw_query = scope.get("query_string", b"").decode("latin-1")
-            for item in raw_query.split("&"):
-                key, _, value = item.partition("=")
-                if key == "token" and value == AUTH_TOKEN:
-                    return True
-        return False
-
-    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http":
-            await self.app(scope, receive, send)
-            return
-
-        path = scope.get("path", "")
-        if path == "/health" or self._authorized(scope):
-            await self.app(scope, receive, send)
-            return
-
-        response = JSONResponse(
-            {"error": "Unauthorized"},
-            status_code=401,
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-        await response(scope, receive, send)
 
 
 async def _not_found(_: Request) -> JSONResponse:
@@ -636,17 +567,16 @@ app = Starlette(
             methods=["GET"],
         ),
         # The dispatcher preserves the SDK's native /mcp, /sse and
-        # /messages/ paths while still allowing one outer authentication layer.
+        # /messages/ paths.
         Mount("/", app=transport_app),
         Route("/{path:path}", _not_found),
     ],
     lifespan=lambda _: mcp.session_manager.run(),
 )
-app = BearerTokenMiddleware(app)
 
 
 def main() -> None:
-    """Run stdio locally or the authenticated HTTP app in deployments."""
+    """Run stdio locally or the HTTP app in deployments."""
     transport = os.getenv("MCP_TRANSPORT", "streamable-http").lower()
     if transport == "stdio":
         mcp.run(transport="stdio")

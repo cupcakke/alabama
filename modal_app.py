@@ -3,11 +3,12 @@
 Local commands:
 
     python -m pip install -r requirements-modal.txt
-    modal secret create alabama-mcp-auth MCP_AUTH_TOKEN="$(openssl rand -hex 32)"
     modal deploy modal_app.py
 
 The deployed MCP endpoint is printed by Modal. Append ``/mcp`` when adding it
-as a remote Streamable HTTP MCP server in Valyu DeepResearch.
+as a remote Streamable HTTP MCP server in Valyu DeepResearch.  The endpoint
+does not require authentication; anyone who can reach the URL can read every
+Markdown file in the repository.
 """
 
 from pathlib import Path
@@ -17,7 +18,6 @@ import modal
 
 APP_NAME = "alabama-markdown-mcp"
 REPOSITORY_ROOT = Path(__file__).resolve().parent
-AUTH_SECRET_NAME = "alabama-mcp-auth"
 
 # Keep the source and Markdown corpus in the image.  The .md files are small
 # enough for an image layer and this makes each deployment self-contained and
@@ -54,15 +54,10 @@ image = (
 )
 
 app = modal.App(APP_NAME)
-auth_secret = modal.Secret.from_name(
-    AUTH_SECRET_NAME,
-    required_keys=["MCP_AUTH_TOKEN"],
-)
 
 
 @app.function(
     image=image,
-    secrets=[auth_secret],
 )
 @modal.concurrent(max_inputs=100)
 @modal.asgi_app()
