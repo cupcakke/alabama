@@ -116,7 +116,13 @@ curl -X POST https://api.valyu.ai/v1/deepresearch/tasks \
 JSON
 ```
 
-A Valyu felületén ugyanezeket az adatokat kell megadni az **MCP server / custom MCP** mezőknél: URL, név és a `search`, `fetch` engedélyezése. Hitelesítés nem szükséges, az `auth` mezőt ne töltsd ki.
+A Valyu felületén ugyanezeket az adatokat kell megadni az **MCP server / custom MCP** mezőknél:
+
+- **Server URL** — kötelező. Ide a deployed szerver `/mcp` végpontja kerül (pl. `https://<host>/mcp`).
+- **Name (Tool Prefix)** — **kötelező, nem üres és nem hagyható ki.** Ez a név lesz az összes eszköznév előtagja, például `alabama` név esetén a toolok neve `alabama_search`, `alabama_fetch` stb. Adj meg egy rövid, ékezet- és szóközmentes azonosítót (pl. `alabama`).
+- **allowed tools / search, fetch** — engedélyezd a `search` és a `fetch` eszközt (a platform által generált előtaggal együtt, pl. `alabama_search`).
+
+Hitelesítés nem szükséges, az `auth` mezőt ne töltsd ki. Ha a Name (Tool Prefix) mezőt üresen hagyod, a Valyu hibát jelez (`Name is required`); ez a platform oldali elvárás, tehát a név megadása kötelező.
 
 Használható kutatási utasítás:
 

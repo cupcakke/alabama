@@ -1,16 +1,3 @@
-"""Deploy the Alabama Markdown MCP server on Modal.
-
-Local commands:
-
-    python -m pip install -r requirements-modal.txt
-    modal deploy modal_app.py
-
-The deployed MCP endpoint is printed by Modal. Append ``/mcp`` when adding it
-as a remote Streamable HTTP MCP server in Valyu DeepResearch.  The endpoint
-does not require authentication; anyone who can reach the URL can read every
-Markdown file in the repository.
-"""
-
 from pathlib import Path
 
 import modal
@@ -19,9 +6,6 @@ import modal
 APP_NAME = "alabama-markdown-mcp"
 REPOSITORY_ROOT = Path(__file__).resolve().parent
 
-# Keep the source and Markdown corpus in the image.  The .md files are small
-# enough for an image layer and this makes each deployment self-contained and
-# reproducible rather than depending on GitHub at container startup.
 image = (
     modal.Image.debian_slim(python_version="3.11")
     .uv_pip_install(
@@ -62,7 +46,6 @@ app = modal.App(APP_NAME)
 @modal.concurrent(max_inputs=100)
 @modal.asgi_app()
 def web():
-    """Expose the repository MCP ASGI application through Modal."""
     import sys
 
     if "/app" not in sys.path:

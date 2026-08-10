@@ -1,11 +1,3 @@
-"""Remote MCP server for searching and reading this repository's Markdown files.
-
-The server exposes the read-only ``search`` and ``fetch`` tools expected by
-research clients, plus a few repository-oriented helper tools.  HTTP clients
-should connect to ``/mcp`` using Streamable HTTP.  A legacy SSE endpoint is
-also mounted at ``/sse`` for clients that have not moved to Streamable HTTP.
-"""
-
 from __future__ import annotations
 
 import logging
@@ -33,11 +25,6 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 
-
-# ---------------------------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------------------------
-
 REPOSITORY_ROOT = Path(
     os.getenv("MCP_ROOT", str(Path(__file__).resolve().parent))
 ).expanduser().resolve()
@@ -50,8 +37,6 @@ MAX_SEARCH_RESULTS = max(1, min(int(os.getenv("MAX_SEARCH_RESULTS", "10")), 50))
 MAX_FETCH_CHARS = max(1, int(os.getenv("MAX_FETCH_CHARS", "2000000")))
 MAX_SNIPPET_CHARS = max(80, min(int(os.getenv("MAX_SNIPPET_CHARS", "900")), 5000))
 
-# Directory names that are implementation details, not repository documents.
-# In particular, never accidentally expose Git metadata or a virtualenv.
 EXCLUDED_DIRECTORY_NAMES = {
     ".git",
     ".hg",
@@ -66,14 +51,8 @@ EXCLUDED_DIRECTORY_NAMES = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Document indexing and retrieval
-# ---------------------------------------------------------------------------
-
 @dataclass(frozen=True)
 class DocumentInfo:
-    """Stable metadata for one Markdown file."""
-
     id: str
     path: Path
     size_bytes: int
@@ -81,16 +60,11 @@ class DocumentInfo:
 
 
 class MarkdownRepository:
-    """Small, dependency-free Markdown index for a repository on disk.
-
-    The repository is intentionally scanned from disk instead of copied into a
-    second data store.  That keeps the deployment simple and means a mounted
-    volume or an updated checkout is reflected on the next request.
-    """
-
     def __init__(self, root: Path) -> None:
         self.root = root
         self._cache: dict[str, tuple[int, int, str]] = {}
+        self._index: dict[str, DocumentInfo] | None = None
+        self._index_signature: tuple[int, int] | None = None
         self._lock = threading.RLock()
 
     def _is_allowed_path(self, path: Path) -> bool:
@@ -102,12 +76,17 @@ class MarkdownRepository:
             return False
         return not any(part in EXCLUDED_DIRECTORY_NAMES for part in relative.parts)
 
-    def documents(self) -> list[DocumentInfo]:
-        """Return every Markdown document below the repository root."""
+    def _scan_signature(self) -> tuple[int, int] | None:
         if not self.root.exists():
-            raise RuntimeError(f"MCP_ROOT does not exist: {self.root}")
+            return None
+        try:
+            root_stat = self.root.stat()
+        except OSError:
+            return None
+        return (root_stat.st_mtime_ns, root_stat.st_ino)
 
-        found: list[DocumentInfo] = []
+    def _rebuild_index(self) -> None:
+        found: dict[str, DocumentInfo] = {}
         for path in self.root.rglob("*"):
             if not path.is_file() or not self._is_allowed_path(path):
                 continue
@@ -117,31 +96,54 @@ class MarkdownRepository:
             except (OSError, ValueError) as exc:
                 logger.warning("Skipping unreadable file %s: %s", path, exc)
                 continue
-            found.append(
-                DocumentInfo(
-                    id=relative,
-                    path=path,
-                    size_bytes=stat.st_size,
-                    modified_at=datetime.fromtimestamp(
-                        stat.st_mtime, tz=timezone.utc
-                    ).isoformat(),
-                )
+            found[relative] = DocumentInfo(
+                id=relative,
+                path=path,
+                size_bytes=stat.st_size,
+                modified_at=datetime.fromtimestamp(
+                    stat.st_mtime, tz=timezone.utc
+                ).isoformat(),
+            )
+        self._index = found
+        self._index_signature = self._scan_signature()
+
+    def documents(self) -> list[DocumentInfo]:
+        if not self.root.exists():
+            raise RuntimeError(f"MCP_ROOT does not exist: {self.root}")
+        signature = self._scan_signature()
+        with self._lock:
+            if self._index is None or self._index_signature != signature:
+                self._rebuild_index()
+            return sorted(
+                self._index.values(), key=lambda item: item.id.casefold()
             )
 
-        found.sort(key=lambda item: item.id.casefold())
-        return found
-
     def get(self, document_id: str) -> DocumentInfo:
-        """Resolve a document ID without allowing path traversal."""
         if not document_id or "\\" in document_id:
             raise KeyError(document_id)
-
-        # IDs are emitted by documents(), so matching against that index also
-        # prevents symlinks and non-Markdown files from being fetched.
-        for info in self.documents():
-            if info.id == document_id:
-                return info
-        raise KeyError(document_id)
+        try:
+            candidate = (self.root / document_id).resolve()
+            relative = candidate.relative_to(self.root)
+        except (OSError, ValueError):
+            raise KeyError(document_id)
+        if candidate.is_symlink():
+            raise KeyError(document_id)
+        if not candidate.is_file() or candidate.suffix.lower() != ".md":
+            raise KeyError(document_id)
+        if any(part in EXCLUDED_DIRECTORY_NAMES for part in relative.parts):
+            raise KeyError(document_id)
+        try:
+            stat = candidate.stat()
+        except OSError:
+            raise KeyError(document_id)
+        return DocumentInfo(
+            id=relative.as_posix(),
+            path=candidate,
+            size_bytes=stat.st_size,
+            modified_at=datetime.fromtimestamp(
+                stat.st_mtime, tz=timezone.utc
+            ).isoformat(),
+        )
 
     def read(self, document_id: str) -> tuple[DocumentInfo, str]:
         info = self.get(document_id)
@@ -150,10 +152,9 @@ class MarkdownRepository:
         except OSError as exc:
             raise KeyError(document_id) from exc
 
-        cache_key = info.id
         signature = (stat.st_mtime_ns, stat.st_size)
         with self._lock:
-            cached = self._cache.get(cache_key)
+            cached = self._cache.get(info.id)
             if cached is not None and cached[:2] == signature:
                 return info, cached[2]
 
@@ -163,7 +164,7 @@ class MarkdownRepository:
             raise KeyError(document_id) from exc
 
         with self._lock:
-            self._cache[cache_key] = (signature[0], signature[1], text)
+            self._cache[info.id] = (signature[0], signature[1], text)
         return info, text
 
 
@@ -171,7 +172,6 @@ repository = MarkdownRepository(REPOSITORY_ROOT)
 
 
 def _fold(value: str) -> str:
-    """Case- and accent-insensitive representation for human search."""
     normalized = unicodedata.normalize("NFKD", value)
     return "".join(char for char in normalized if not unicodedata.combining(char)).casefold()
 
@@ -181,7 +181,6 @@ def _query_terms(query: str) -> list[str]:
 
 
 def _score_document(query: str, info: DocumentInfo, text: str) -> float:
-    """Rank a document using deterministic lexical relevance signals."""
     folded_query = _fold(query).strip()
     folded_text = _fold(text)
     folded_title = _fold(info.id)
@@ -201,19 +200,14 @@ def _score_document(query: str, info: DocumentInfo, text: str) -> float:
         if title_hits:
             score += min(title_hits, 3) * 8.0
         if body_hits:
-            # A large document should not win merely because a common term is
-            # repeated hundreds of times.
             score += min(body_hits, 20) * 1.5
 
-    # Reward documents that contain all query terms, which is useful for names
-    # and case numbers in legal records.
     if terms and all(term in folded_text or term in folded_title for term in terms):
         score += 12.0
     return score
 
 
 def _snippet(text: str, query: str, max_chars: int = MAX_SNIPPET_CHARS) -> str:
-    """Return a compact context window around the first matching term."""
     if not text:
         return ""
     folded_text = _fold(text)
@@ -242,22 +236,10 @@ def _title(document_id: str) -> str:
 
 
 def _citation_url(document_id: str) -> str:
-    """Build a stable, human-readable citation URL.
-
-    ``PUBLIC_BASE_URL`` points to the deployed server and is preferred when it
-    is set.  The server exposes those citations under ``/documents``.  Without
-    it, citations point directly at the configured GitHub blob base.  The
-    document ID is encoded as one URL path segment so spaces and accented
-    filenames remain unambiguous.
-    """
     if PUBLIC_BASE_URL:
         return f"{PUBLIC_BASE_URL}/documents/{quote(document_id, safe='')}"
     return f"{CITATION_BASE_URL}/{quote(document_id, safe='')}"
 
-
-# ---------------------------------------------------------------------------
-# MCP output models
-# ---------------------------------------------------------------------------
 
 class SearchResult(BaseModel):
     id: str = Field(description="Stable Markdown document ID passed to fetch")
@@ -307,10 +289,6 @@ class SearchDocumentsOutput(BaseModel):
     results: list[SearchDocumentsResult]
 
 
-# ---------------------------------------------------------------------------
-# MCP tools
-# ---------------------------------------------------------------------------
-
 server_instructions = """
 This read-only MCP server provides access to every Markdown file in the
 Alabama repository. Use search(query) first to find relevant documents, then
@@ -324,8 +302,6 @@ mcp = FastMCP(
     name="Alabama Markdown Repository",
     instructions=server_instructions,
     stateless_http=True,
-    # Streamable HTTP can return either JSON or SSE.  Keeping SSE enabled also
-    # works with older clients while the endpoint remains /mcp.
     json_response=False,
     host="0.0.0.0",
     port=int(os.getenv("PORT", "8000")),
@@ -334,12 +310,6 @@ mcp = FastMCP(
 
 @mcp.tool()
 def search(query: str) -> SearchOutput:
-    """Search all Markdown files and return citable document IDs.
-
-    Use a natural-language query containing the names, dates, case numbers, or
-    topics you need.  This tool returns only lightweight result metadata; call
-    fetch with a returned ID to read the document text.
-    """
     query = query.strip()
     if not query:
         return SearchOutput(results=[])
@@ -369,11 +339,6 @@ def search(query: str) -> SearchOutput:
 
 @mcp.tool()
 def fetch(id: str) -> FetchOutput:
-    """Fetch the complete Markdown text for a document returned by search.
-
-    The ``id`` must be copied exactly from a search result.  The response is
-    read-only and includes metadata such as file size and line count.
-    """
     try:
         info, text = repository.read(id)
     except KeyError as exc:
@@ -407,7 +372,6 @@ def fetch(id: str) -> FetchOutput:
 
 @mcp.tool()
 def list_documents() -> RepositoryDocumentsOutput:
-    """List every Markdown file available in the repository."""
     documents = repository.documents()
     return RepositoryDocumentsOutput(
         total=len(documents),
@@ -431,11 +395,6 @@ def search_documents(
         default=10, ge=1, le=50, description="Maximum number of results"
     ),
 ) -> SearchDocumentsOutput:
-    """Search with scores and text snippets for interactive MCP clients.
-
-    The compatibility search tool is intentionally minimal.  Use this helper
-    when you need snippets before deciding which document to fetch.
-    """
     query = query.strip()
     max_results = max(1, min(int(max_results), 50))
     if not query:
@@ -475,11 +434,6 @@ def get_document(
         default=400, ge=1, le=5000, description="Maximum number of lines"
     ),
 ) -> str:
-    """Read a line range from a Markdown document.
-
-    This is a fallback for documents larger than a model's preferred context
-    window.  For normal retrieval use fetch, which returns the whole document.
-    """
     try:
         info, text = repository.read(id)
     except KeyError as exc:
@@ -497,10 +451,6 @@ def get_document(
     )
     return header + "\n".join(selected)
 
-
-# ---------------------------------------------------------------------------
-# HTTP application and health check
-# ---------------------------------------------------------------------------
 
 async def health(_: Request) -> JSONResponse:
     try:
@@ -521,7 +471,6 @@ async def health(_: Request) -> JSONResponse:
 
 
 async def document_http(request: Request) -> PlainTextResponse | JSONResponse:
-    """Human-readable HTTP citation endpoint for server-generated URLs."""
     document_id = request.path_params.get("document_id", "")
     try:
         _, text = repository.read(document_id)
@@ -534,16 +483,11 @@ async def _not_found(_: Request) -> JSONResponse:
     return JSONResponse({"error": "Not found"}, status_code=404)
 
 
-# FastMCP creates its own lifespan for the session manager.  Since both apps
-# are mounted below one outer Starlette app, explicitly run that lifespan here
-# (nested Starlette lifespans are not propagated through Mount).
 streamable_app = mcp.streamable_http_app()
 sse_app = mcp.sse_app()
 
 
 class MCPTransportDispatcher:
-    """Dispatch the SDK's two native transports from one root mount."""
-
     def __init__(self, streamable: Any, sse: Any) -> None:
         self.streamable = streamable
         self.sse = sse
@@ -566,8 +510,6 @@ app = Starlette(
             document_http,
             methods=["GET"],
         ),
-        # The dispatcher preserves the SDK's native /mcp, /sse and
-        # /messages/ paths.
         Mount("/", app=transport_app),
         Route("/{path:path}", _not_found),
     ],
@@ -576,7 +518,6 @@ app = Starlette(
 
 
 def main() -> None:
-    """Run stdio locally or the HTTP app in deployments."""
     transport = os.getenv("MCP_TRANSPORT", "streamable-http").lower()
     if transport == "stdio":
         mcp.run(transport="stdio")
