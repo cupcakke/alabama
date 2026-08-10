@@ -2,7 +2,7 @@
 
 Ez a repository minden `.md` fájlját egy **read-only Model Context Protocol (MCP)** szerveren keresztül teszi kereshetővé és olvashatóvá. A szerver a Valyu DeepResearch egyedi MCP-forrásaként használható.
 
-> **Adatvédelmi figyelmeztetés:** a repository jelenleg jogi és személyes adatokat tartalmaz. A remote MCP-szerverhez interneten keresztül hozzáférő kliens a teljes Markdown-tartalmat el tudja olvasni. Csak megbízható Valyu-fiókhoz csatlakoztasd, használj hosszú véletlen tokent, és ne tedd közzé a tokent.
+> **Adatvédelmi figyelmeztetés:** a repository jogi és személyes adatokat tartalmaz. A remote MCP-szerver szándékosan hitelesítés nélkül érhető el, ezért bárki, aki ismeri az URL-t, elolvashatja a teljes Markdown-tartalmat. Csak olyan hálózatra vagy szolgáltatásba deployold, ahol ez elfogadható.
 
 ## Mit biztosít a szerver?
 
@@ -26,8 +26,8 @@ pip install -r requirements.txt
 # Helyi MCP Inspector / MCP kliens számára, stdio transporttal:
 MCP_TRANSPORT=stdio python server.py
 
-# HTTP tesztként:
-MCP_AUTH_TOKEN=dev-token python server.py
+# HTTP tesztként (nem kell token):
+python server.py
 ```
 
 HTTP esetén az endpointok:
@@ -37,17 +37,12 @@ HTTP esetén az endpointok:
 - Health check: `http://localhost:8000/health`
 - Böngészőből olvasható citation endpoint: `http://localhost:8000/documents/<encoded-id>`
 
-A `MCP_AUTH_TOKEN` nincs kötelezővé téve lokális fejlesztésben. Internetre kitett szervernél **kötelező** beállítani. A kliens ezt küldje:
-
-```http
-Authorization: Bearer <MCP_AUTH_TOKEN>
-```
+A HTTP MCP endpoint hitelesítés nélkül használható; a kapcsolódó klienskonfigurációban ne adj meg Bearer tokent vagy más auth beállítást.
 
 ### Gyors health check
 
 ```bash
 curl http://localhost:8000/health
-curl -H "Authorization: Bearer dev-token" http://localhost:8000/health
 ```
 
 ## Deploy Renderre – legegyszerűbb remote megoldás
@@ -56,7 +51,7 @@ A repository tartalmaz `Dockerfile`-t és `render.yaml` Blueprintet.
 
 1. Pushold ezt a branchet GitHubra, vagy a módosítások merge-elése után válaszd ki a repositoryt Renderben.
 2. Renderben: **New → Blueprint** vagy **New Web Service**, repository: `cupcakke/alabama`.
-3. Docker runtime esetén a `Dockerfile` automatikusan indul. A `render.yaml` létrehozza az `MCP_AUTH_TOKEN` secretet.
+3. Docker runtime esetén a `Dockerfile` automatikusan indul. A `render.yaml` nem hoz létre auth secretet, mert az MCP endpoint nyilvános.
 4. A deploy után ellenőrizd:
 
    ```bash
@@ -91,10 +86,6 @@ A Valyu DeepResearch task `mcp_servers` mezőjében add meg a saját deployed sz
     {
       "url": "https://<render-service>.onrender.com/mcp",
       "name": "Alabama case documents",
-      "auth": {
-        "type": "bearer",
-        "token": "<MCP_AUTH_TOKEN>"
-      },
       "allowed_tools": [
         "search",
         "fetch"
@@ -118,10 +109,6 @@ curl -X POST https://api.valyu.ai/v1/deepresearch/tasks \
     {
       "url": "https://<render-service>.onrender.com/mcp",
       "name": "Alabama case documents",
-      "auth": {
-        "type": "bearer",
-        "token": "<MCP_AUTH_TOKEN>"
-      },
       "allowed_tools": ["search", "fetch"]
     }
   ]
@@ -129,7 +116,7 @@ curl -X POST https://api.valyu.ai/v1/deepresearch/tasks \
 JSON
 ```
 
-A Valyu felületén ugyanezeket az adatokat kell megadni az **MCP server / custom MCP** mezőknél: URL, név, Bearer authentication és a `search`, `fetch` engedélyezése. A token helyére a Render secret pontos értéke kerüljön; a token ne kerüljön Git-be, promptba vagy nyilvános issue-ba.
+A Valyu felületén az **MCP server / custom MCP** mezőknél csak az URL-t, a nevet és a `search`, `fetch` eszközöket add meg. Authentication/Bearer token mezőt ne tölts ki.
 
 Használható kutatási utasítás:
 
@@ -139,18 +126,16 @@ Használható kutatási utasítás:
 
 | Változó | Alapértelmezett | Leírás |
 | --- | --- | --- |
-| `MCP_AUTH_TOKEN` | üres | Bearer token remote HTTP védelemhez. Productionben állítsd be. |
 | `MCP_ROOT` | `server.py` könyvtára | A beolvasandó repository-gyökér. Dockerben `/app`. |
 | `PORT` | `8000` | HTTP port; a legtöbb PaaS felülírja. |
 | `PUBLIC_BASE_URL` | üres | Ha megadod, a citation URL-ek ezt a hostot használják. |
 | `CITATION_BASE_URL` | GitHub `main` blob URL | Fallback citation host. Állítsd a tényleges adatbranchre. |
 | `MAX_SEARCH_RESULTS` | `10` | A kompatibilis `search` legfeljebb ennyi találatot ad. |
 | `MAX_FETCH_CHARS` | `2,000,000` | Biztonsági válaszlimit; a jelenlegi legnagyobb fájl ennél kisebb. |
-| `MCP_ALLOW_QUERY_TOKEN` | `false` | Ne engedélyezd URL queryben a tokent, mert logokba kerülhet. |
 
 ## Biztonsági megjegyzések
 
 - Csak `.md` fájlok olvashatók; a `.git`, virtualenv és symlinkek ki vannak zárva.
 - A `fetch` és a helper eszközök nem engednek path traversal-t (`../`) és nem írnak lemezre.
 - A dokumentumok tartalma prompt injectiont is tartalmazhat. A Valyu kutatási utasításában kezeld az iratokat adatként, ne végrehajtandó utasításként.
-- A szerver lokálisan token nélkül is fut a könnyebb tesztelés miatt. Nyilvános deploy előtt állíts be `MCP_AUTH_TOKEN`-t, és ellenőrizd a `/health` választ.
+- A szerver HTTP endpointjai hitelesítés nélkül működnek. Nyilvános deploy előtt mérlegeld, hogy az összes Markdown-dokumentum szabadon elérhető lesz.

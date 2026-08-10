@@ -38,3 +38,17 @@ def test_path_traversal_is_rejected():
         assert "not found" in str(exc).lower()
     else:  # pragma: no cover - defensive assertion
         raise AssertionError("path traversal unexpectedly succeeded")
+
+
+def test_http_documents_are_available_without_authentication():
+    """Remote clients can use the public endpoint without an MCP auth token."""
+    from starlette.testclient import TestClient
+
+    with TestClient(server.app) as client:
+        response = client.get("/documents/README.md")
+        health = client.get("/health")
+
+    assert response.status_code == 200
+    assert "Alabama Markdown MCP server" in response.text
+    assert health.status_code == 200
+    assert health.json()["authentication"] == "none"
