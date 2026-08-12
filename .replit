@@ -1,0 +1,15 @@
+modules = ["nodejs-20"]
+
+[nix]
+channel = "stable-25_05"
+
+[agent]
+expertMode = true
+
+run = "cd mcp-server && npm install && npm run build && npm start"
+
+[deployment]
+run = ["sh", "-c", "cd mcp-server && npm install && npm run build && npm start"]
+healthcheckPath = "/mcp"
+healthcheckTimeout = 10000
+PORT = 8080

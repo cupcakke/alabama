@@ -1,0 +1,10 @@
+export const REPOSITORY_URL = "https://github.com/cupcakke/alabama.git";
+export const REPOSITORY_REF = "main";
+export const MARKDOWN_EXTENSION = ".md";
+export const MCP_ENDPOINT_PATH = "/mcp";
+export const SERVER_NAME = "alabama-md-mcp-server";
+export const SERVER_VERSION = "1.0.0";
+export const DEFAULT_PORT = 8080;
+export const DEFAULT_TOOL_NAME = "search_alabama_md";
+export const MAX_SNIPPET_RESULTS = 25;
+export const SNIPPET_CONTEXT_CHARS = 320;
